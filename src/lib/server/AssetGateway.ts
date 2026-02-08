@@ -3,6 +3,8 @@ import path from 'path';
 import crypto from 'crypto';
 import * as cheerio from 'cheerio';
 import { Readable } from 'stream';
+import { parse } from '@astrojs/compiler';
+import { is, serialize } from '@astrojs/compiler/utils';
 
 export class AssetGateway {
   private cacheDir: string;
@@ -33,7 +35,15 @@ export class AssetGateway {
           contentType = meta.contentType;
         } catch (e) { }
       }
-      return { stream: fs.createReadStream(cachePath), contentType };
+      try {
+        const stream = fs.createReadStream(cachePath);
+        // Suppress unhandled errors (e.g. file deletion race conditions)
+        stream.on('error', () => {});
+        return { stream, contentType };
+      } catch (e) {
+        // Fallback to fetch if opening stream fails (e.g. race condition/deletion)
+        console.warn(`Failed to open cached asset: ${url}`, e);
+      }
     }
 
     // Miss - fetch with User-Agent for Google Fonts compatibility
@@ -58,11 +68,96 @@ export class AssetGateway {
         await fs.writeJson(metadataPath, { contentType });
       }
 
-      return { stream: fs.createReadStream(cachePath), contentType };
+      const stream = fs.createReadStream(cachePath);
+      // Suppress unhandled errors
+      stream.on('error', () => {});
+      return { stream, contentType };
     } catch (e) {
       console.warn(`Failed to fetch asset: ${url}`, e);
       return null;
     }
+  }
+
+  rewriteCssUrls(css: string, baseUrl: string): string {
+    const discovered: string[] = [];
+
+    // First pass: rewrite bare-string @import (not @import url() which is handled below)
+    // Matches: @import '../reset.css'; and @import "https://fonts.googleapis.com/...";
+    const importRewritten = css.replace(
+      /@import\s+(['"])([^'"]+)\1\s*;/g,
+      (match, quote, rawUrl) => {
+        const trimmed = rawUrl.trim();
+
+        if (
+          !trimmed ||
+          trimmed.startsWith('data:') ||
+          trimmed.startsWith('/_stitch/')
+        ) {
+          return match;
+        }
+
+        let resolved: string;
+        try {
+          if (trimmed.startsWith('//')) {
+            resolved = new URL(trimmed, baseUrl).href;
+          } else if (/^https?:\/\//.test(trimmed)) {
+            resolved = trimmed;
+          } else {
+            resolved = new URL(trimmed, baseUrl).href;
+          }
+        } catch {
+          return match;
+        }
+
+        discovered.push(resolved);
+        return `@import ${quote}/_stitch/asset?url=${encodeURIComponent(resolved)}${quote};`;
+      },
+    );
+
+    // Second pass: rewrite url() references (covers @import url(), font src, background, etc.)
+    const rewritten = importRewritten.replace(
+      /url\(\s*(['"]?)([^)]*?)\1\s*\)/g,
+      (match, quote, rawUrl) => {
+        const trimmed = rawUrl.trim();
+
+        // Skip empty, data URIs, fragment-only refs, and already-proxied URLs
+        if (
+          !trimmed ||
+          trimmed.startsWith('data:') ||
+          (trimmed.startsWith('#') && !trimmed.startsWith('#/')) ||
+          trimmed.startsWith('/_stitch/')
+        ) {
+          return match;
+        }
+
+        let resolved: string;
+        try {
+          if (trimmed.startsWith('//')) {
+            // Protocol-relative URL — resolve against base to get full URL
+            resolved = new URL(trimmed, baseUrl).href;
+          } else if (/^https?:\/\//.test(trimmed)) {
+            // Already absolute HTTP URL
+            resolved = trimmed;
+          } else {
+            // Relative URL — resolve against baseUrl
+            resolved = new URL(trimmed, baseUrl).href;
+          }
+        } catch {
+          // Malformed URL — leave unchanged
+          return match;
+        }
+
+        discovered.push(resolved);
+        return `url(${quote}/_stitch/asset?url=${encodeURIComponent(resolved)}${quote})`;
+      },
+    );
+
+    // Optimistic prefetch for discovered URLs
+    for (const url of discovered) {
+      this.fetchAsset(url).catch(() => {});
+    }
+
+    return rewritten;
   }
 
   async rewriteHtmlForPreview(html: string): Promise<string> {
@@ -153,7 +248,9 @@ export class AssetGateway {
         const result = await this.fetchAsset(url);
         if (!result) return; // Skip failed assets
 
-        const { contentType } = result;
+        const { stream, contentType } = result;
+        stream.destroy(); // Close the stream as we only need the content type here
+
         const hash = this.getHash(url);
 
         // Try URL extension first, fall back to Content-Type
@@ -200,18 +297,68 @@ export class AssetGateway {
       }
     });
 
-    // Escape curly braces for Astro compatibility
-    // Astro interprets {...} as template expressions, so we need to escape them
-    // Replace { with {'{'} and } with {'}'}
-    let outputHtml = $.html();
-    outputHtml = outputHtml.replace(/[{}]/g, (match) => {
-      return match === '{' ? "{'{'}" : "{'}'}";
-    });
+    // Use AST-based escaping for curly braces
+    // This escapes {...} only in text nodes that are NOT inside <script> or <style> elements
+    // Making the output compatible with Astro, React, and other JSX-like frameworks
 
-    // Add Astro frontmatter fences to make this a valid .astro file
-    const astroOutput = `---
----
-${outputHtml}`;
+    // Remove DOCTYPE declaration using Cheerio's DOM API (more robust than regex)
+    // Astro adds DOCTYPE during build, and the Astro compiler's serialize function
+    // incorrectly outputs just "html" for DOCTYPE nodes
+    $.root().contents().filter((_, el) => el.type === 'directive' && el.name === '!doctype').remove();
+
+    let outputHtml = $.html();
+
+    // Add Astro frontmatter fences first to make it parseable
+    const astroContent = `---\n---\n${outputHtml}`;
+
+    // Parse with Astro compiler to get AST
+    const parseResult = await parse(astroContent, { position: false });
+
+    // Elements whose content should not be escaped
+    const skipElements = new Set(['script', 'style']);
+
+    // Recursive function to walk and escape expression nodes
+    // The Astro parser converts {foo} into expression nodes, so we need to
+    // convert them back to escaped text like {'{'}foo{'}'}
+    const escapeExpressions = (node: any, insideSkipElement: boolean): void => {
+      // Check if this is a skip element
+      const isSkipElement = is.element(node) && skipElements.has(node.name.toLowerCase());
+      const shouldSkip = insideSkipElement || isSkipElement;
+
+      // Process children and convert expression nodes to escaped text
+      if (is.parent(node) && !shouldSkip) {
+        const newChildren: any[] = [];
+        for (const child of node.children) {
+          // Convert expression nodes to escaped text
+          if (child.type === 'expression') {
+            // Get the expression content
+            const exprContent = child.children
+              ?.filter((c: any) => is.text(c))
+              .map((c: any) => c.value)
+              .join('') || '';
+            // Replace with escaped text: {'{'}content{'}'}
+            newChildren.push({
+              type: 'text',
+              value: `{'{'}${exprContent}{'}'}`
+            });
+          } else {
+            newChildren.push(child);
+            escapeExpressions(child, shouldSkip);
+          }
+        }
+        node.children = newChildren;
+      } else if (is.parent(node)) {
+        // Inside skip element, just recurse without escaping
+        for (const child of node.children) {
+          escapeExpressions(child, shouldSkip);
+        }
+      }
+    };
+
+    // Start walking from the root
+    escapeExpressions(parseResult.ast, false);
+
+    const astroOutput = serialize(parseResult.ast);
 
     return { html: astroOutput, assets };
   }

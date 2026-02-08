@@ -2,25 +2,15 @@ import React from 'react';
 import { Text } from 'ink';
 
 interface StatusIconProps {
-  status: 'included' | 'ignored';
-  warning?: string;
-  isArtifact?: boolean;
-  isObsolete?: boolean;
+  status: 'included' | 'ignored' | 'discarded';
 }
 
-export const StatusIcon: React.FC<StatusIconProps> = ({ status, warning, isArtifact, isObsolete }) => {
-  if (warning) {
-    return <Text color="yellow">⚠️ </Text>;
-  }
-  if (isArtifact) {
-    return <Text color="gray">🖼️ </Text>;
-  }
-  if (isObsolete) {
-    return <Text color="gray">🏚️ </Text>;
-  }
-
+export const StatusIcon: React.FC<StatusIconProps> = ({ status }) => {
   if (status === 'included') {
     return <Text color="green">✔ </Text>;
   }
-  return <Text color="gray">✖ </Text>;
+  if (status === 'discarded') {
+    return <Text color="red">✖ </Text>;
+  }
+  return <Text color="gray">- </Text>;
 };
