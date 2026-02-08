@@ -25,7 +25,7 @@ export async function execCommand(command: string[], options?: { cwd?: string; e
       env: { ...process.env, ...(options?.env || {}) },
       stdio: 'pipe',
       timeout: options?.timeout,
-      shell: process.platform === 'win32'
+      shell: process.platform === 'win32' ? 'powershell.exe' : true
     };
 
     const child = spawn(cmd, args, spawnOptions) as ChildProcess;
@@ -84,7 +84,7 @@ export async function execCommandStreaming(
       cwd: options?.cwd || process.cwd(),
       env: { ...process.env, ...(options?.env || {}) },
       stdio: 'pipe',
-      shell: process.platform === 'win32'
+      shell: process.platform === 'win32' ? 'powershell.exe' : true
     };
 
     const child = spawn(cmd, args, spawnOptions) as ChildProcess;

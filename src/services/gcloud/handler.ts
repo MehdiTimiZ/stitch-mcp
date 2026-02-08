@@ -517,20 +517,16 @@ export class GcloudHandler implements GcloudService {
   // ============================================================================
 
   private async findGlobalGcloud(): Promise<string | null> {
-    const exists = await commandExists(this.platform.gcloudBinaryName);
-    if (!exists) {
-      return null;
-    }
-
-    // Get path to gcloud
-    const result = await execCommand(
-      this.platform.isWindows
-        ? ['where', this.platform.gcloudBinaryName]
-        : ['which', this.platform.gcloudBinaryName]
-    );
-
-    if (result.success) {
-      return result.stdout.trim().split('\n')[0] || null;
+    // Verify gcloud is executable by checking version directly
+    // This avoids issues with 'where' command in PowerShell (alias to Where-Object)
+    // and handles cases where gcloud is a function/alias/ps1 script.
+    try {
+      const result = await execCommand([this.platform.gcloudBinaryName, 'version', '--format=json']);
+      if (result.success) {
+        return this.platform.gcloudBinaryName;
+      }
+    } catch (e) {
+      // Ignore error
     }
 
     return null;

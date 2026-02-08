@@ -25,7 +25,7 @@ export function detectPlatform(): Platform {
     os: detectedOS,
     arch: detectedArch,
     gcloudDownloadUrl: getGcloudDownloadUrl(detectedOS, detectedArch),
-    gcloudBinaryName: platform === 'win32' ? 'gcloud.cmd' : 'gcloud',
+    gcloudBinaryName: 'gcloud',
     isWindows: platform === 'win32',
   };
 }
