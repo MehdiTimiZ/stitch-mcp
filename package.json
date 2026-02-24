@@ -23,7 +23,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun run scripts/build.ts && tsc -p tsconfig.build.json && bun scripts/generate-bin.ts",
+    "build": "npx -y tsx scripts/build.ts && npx tsc -p tsconfig.build.json && npx -y tsx scripts/generate-bin.ts",
     "dev": "bun run src/cli.ts",
     "test": "bun test --preload ./tests/setup.ts",
     "prepublishOnly": "bun run build",
@@ -48,6 +48,7 @@
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "ora": "^8.1.1",
+    "open": "^10.0.0",
     "p-limit": "^7.3.0",
     "react": "^19.2.4",
     "vite": "^7.3.1",

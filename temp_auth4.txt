@@ -1,0 +1,9 @@
+Go to the following link in your browser, and complete the sign-in prompts:
+
+    https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fsdk.cloud.google.com%2Fapplicationdefaultauthcode.html&scope=openid+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fsqlservice.login&state=j4gkmlHEHajlU0wJkMEQrrOiMID18d&prompt=consent&token_usage=remote&access_type=offline&code_challenge=8EZb4tr07wdCcOXTEcZPDGBBaDJdUqy6LkiQQW_t9Lc&code_challenge_method=S256
+
+Once finished, enter the verification code provided in your browser: 
+
+Command killed by keyboard interrupt
+
+Terminate batch job (Y/N)? 

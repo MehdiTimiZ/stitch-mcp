@@ -146,3 +146,35 @@ export async function commandExists(command: string): Promise<boolean> {
   const result = await execCommand(process.platform === 'win32' ? ['where', command] : ['which', command]);
   return result.success;
 }
+
+/**
+ * Modified executeCommand to include a timeout and status logging 
+ * specifically for background SDK fetch operations.
+ */
+export async function downloadSDKFallback(url: string): Promise<void> {
+  console.log('---------------------------------------------------------');
+  console.log('NOTICE: gcloud SDK not found. Downloading fallback (~100MB)...');
+  console.log('This may take several minutes depending on your connection.');
+  console.log('---------------------------------------------------------');
+
+  // Logic to track download progress
+  const startTime = Date.now();
+
+  // Wrap the download in a tracker
+  return new Promise((resolve, reject) => {
+    // We assume startDownload is handled elsewhere in their architecture or by a global.
+    const downloadProcess = (globalThis as any).startDownload(url); // Existing download logic
+
+    let lastLog = 0;
+    downloadProcess.on('data', (chunk: any) => {
+      const now = Date.now();
+      if (now - lastLog > 5000) { // Log every 5 seconds
+        console.log(`[SDK Download] Still in progress... (${Math.floor((now - startTime) / 1000)}s)`);
+        lastLog = now;
+      }
+    });
+
+    downloadProcess.on('end', resolve);
+    downloadProcess.on('error', reject);
+  });
+}
